@@ -1,0 +1,480 @@
+#include <Wire.h>
+#include <SPI.h>
+#include <SD.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+#include <RTClib.h>
+#include <ChainableLED.h>
+#include <EEPROM.h>
+
+#define GREEN_BUTTON_PIN 2
+#define RED_BUTTON_PIN 3
+#define LED_DATA_PIN 7
+#define LED_CLOCK_PIN 8
+#define LIGHT_SENSOR_PIN A2
+#define SD_CS_PIN 4
+#define HYGR_ADDR 10 // Exemple d'adresse dans l'EEPROM pour la valeur de HYGR
+#define HYGR_NOT_AVAILABLE "NA"
+
+bool modeStandard = true;
+bool modeEco = false;
+bool modeMaintenance = false;
+bool modeConfiguration = false;
+
+bool rtcError = false;
+bool gpsError = false;
+bool sdCardFull = false;
+bool sdWriteError = false;
+bool sensorDataError = false;
+
+uint8_t previousMode = 0;
+
+Adafruit_BME280 bme;
+RTC_DS1307 rtc;
+ChainableLED leds(LED_DATA_PIN, LED_CLOCK_PIN, 1);
+
+unsigned long LOG_INTERVAL = 5000UL;
+unsigned long TIMEOUT = 30000UL;
+unsigned long FILE_MAX_SIZE = 4096UL;
+int LUMIN = 1;
+int LUMIN_LOW = 255;
+int LUMIN_HIGH = 768;
+int TEMP_AIR = 1;
+int MIN_TEMP_AIR = -10;
+int MAX_TEMP_AIR = 60;
+int HYGR = 1;
+int HYGR_MINT = 0;
+int HYGR_MAXT = 50;
+int PRESSURE = 1;
+int PRESSURE_MIN = 850;
+int PRESSURE_MAX = 1080;
+
+unsigned long lastDataAcquisitionTime = 0;
+unsigned long modeStartTime = 0;
+unsigned long maintenanceStartTime = 0;
+
+bool isHygrActive = true;
+bool isTempAirActive = true;
+bool isLuminActive = true;
+
+// Variables pour la gestion des boutons avec interruptions
+volatile bool greenButtonState = HIGH;
+volatile bool greenButtonStateChanged = false;
+volatile bool redButtonState = HIGH;
+volatile bool redButtonStateChanged = false;
+
+void setup() {
+  Serial.begin(9600);
+  delay(1000);
+
+  initLED();
+  initButton();
+
+  // Lire la valeur HYGR de l'EEPROM
+  HYGR = EEPROM.read(HYGR_ADDR);
+  if (HYGR == 0) {
+    isHygrActive = false;
+  }
+
+  if (digitalRead(RED_BUTTON_PIN) == LOW) {
+    modConfiguration();
+  } else {
+    modStandard();
+  }
+
+  if (!SD.begin(SD_CS_PIN)) {
+    Serial.println(F("Échec de l'initialisation de la carte SD !"));
+    sdWriteError = true;
+  } else {
+    Serial.println(F("Carte SD initialisée."));
+  }
+
+  if (!bme.begin(0x76)) {
+    Serial.println(F("Impossible de trouver le capteur BME280 !"));
+    sensorDataError = true;
+  }
+
+  if (!rtc.begin()) {
+    Serial.println(F("Impossible de trouver le module RTC !"));
+    rtcError = true;
+  } else if (!rtc.isrunning()) {
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+
+  // Configurer les interruptions pour les boutons sur changement d'état
+  attachInterrupt(digitalPinToInterrupt(GREEN_BUTTON_PIN), greenButtonISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(RED_BUTTON_PIN), redButtonISR, CHANGE);
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+
+  handleButton();
+
+  if ((modeStandard || modeEco) && !modeConfiguration && (currentTime - lastDataAcquisitionTime >= LOG_INTERVAL)) {
+    lastDataAcquisitionTime = currentTime;
+    recupDonnees();
+    afficherDonneesConsole();
+  }
+
+  if (modeMaintenance && (currentTime - lastDataAcquisitionTime >= 5000UL)) {
+    lastDataAcquisitionTime = currentTime;
+    recupDonnees();
+    afficherDonneesConsole();
+  }
+
+  updateLEDs();
+  etatsSystem();
+
+  if (modeConfiguration) {
+    handleSerialCommands();
+  }
+}
+
+// Fonctions d'interruption pour les boutons
+void greenButtonISR() {
+  greenButtonState = digitalRead(GREEN_BUTTON_PIN);
+  greenButtonStateChanged = true;
+}
+
+void redButtonISR() {
+  redButtonState = digitalRead(RED_BUTTON_PIN);
+  redButtonStateChanged = true;
+}
+
+void handleButton() {
+  static unsigned long greenButtonPressTime = 0;
+  static unsigned long redButtonPressTime = 0;
+  static bool greenButtonPressed = false;
+  static bool redButtonPressed = false;
+
+  // Gestion du bouton vert
+  if (greenButtonStateChanged) {
+    greenButtonStateChanged = false;
+    if (greenButtonState == LOW) {
+      // Bouton pressé
+      greenButtonPressTime = millis();
+      greenButtonPressed = true;
+    } else {
+      // Bouton relâché
+      if (greenButtonPressed) {
+        unsigned long duration = millis() - greenButtonPressTime;
+        greenButtonPressed = false;
+        if (duration >= 3000UL) {
+          // Bouton maintenu pendant au moins 3 secondes
+          if (modeStandard) {
+            modEco();
+          } else if (modeEco) {
+            modStandard();
+          }
+        }
+      }
+    }
+  }
+
+  // Gestion du bouton rouge
+  if (redButtonStateChanged) {
+    redButtonStateChanged = false;
+    if (redButtonState == LOW) {
+      // Bouton pressé
+      redButtonPressTime = millis();
+      redButtonPressed = true;
+    } else {
+      // Bouton relâché
+      if (redButtonPressed) {
+        unsigned long duration = millis() - redButtonPressTime;
+        redButtonPressed = false;
+        if (duration >= 3000UL) {
+          // Bouton maintenu pendant au moins 3 secondes
+          if (modeConfiguration) {
+            modStandard();
+            Serial.println(F("Quitter le mode configuration, retour au mode standard."));
+          } else if (modeMaintenance) {
+            if (previousMode == 0) {
+              modStandard();
+            } else {
+              modEco();
+            }
+          } else {
+            modMaintenance();
+          }
+        }
+      }
+    }
+  }
+}
+
+void initLED() {
+  leds.init();
+  leds.setColorRGB(0, 255, 0, 0);
+  delay(500);
+  leds.setColorRGB(0, 0, 255, 0);
+  delay(500);
+  leds.setColorRGB(0, 0, 0, 255);
+  delay(500);
+  leds.setColorRGB(0, 255, 255, 0);
+  delay(500);
+  leds.setColorRGB(0, 0, 0, 0);
+}
+
+void initButton() {
+  pinMode(GREEN_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RED_BUTTON_PIN, INPUT_PULLUP);
+}
+
+void updateLEDs() {
+  if (rtcError) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 0, 0, 255);
+    delay(500);
+  } else if (gpsError) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 255, 255, 0);
+    delay(500);
+  } else if (sdWriteError) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 255, 255, 255);
+    delay(500);
+  } else if (sensorDataError) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 0, 255, 0);
+    delay(1000);
+  } else {
+    if (modeStandard) {
+      leds.setColorRGB(0, 0, 255, 0);
+    } else if (modeEco) {
+      leds.setColorRGB(0, 0, 0, 255);
+    } else if (modeMaintenance) {
+      leds.setColorRGB(0, 148, 0, 211);
+    } else if (modeConfiguration) {
+      leds.setColorRGB(0, 255, 255, 0);
+    }
+  }
+}
+
+void etatsSystem() {
+  // Fonction vide pour l'instant
+}
+
+void modStandard() {
+  modeStandard = true;
+  modeEco = false;
+  modeMaintenance = false;
+  modeConfiguration = false;
+  isLuminActive = true;
+  LOG_INTERVAL = 5000UL;
+  Serial.println(F("Mode Standard activé."));
+}
+
+void modEco() {
+  modeStandard = false;
+  modeEco = true;
+  modeMaintenance = false;
+  modeConfiguration = false;
+  LOG_INTERVAL = 10000UL;
+  Serial.println(F("Mode Économique activé."));
+} 
+
+void modMaintenance() {
+  previousMode = modeEco ? 1 : 0;
+  modeStandard = false;
+  modeEco = false;
+  modeMaintenance = true;
+  modeConfiguration = false;
+  Serial.println(F("Mode Maintenance activé."));
+  maintenanceStartTime = millis(); // Démarrer le chronomètre pour le mode maintenance
+}
+
+void modConfiguration() {
+  modeStandard = false;
+  modeEco = false;
+  modeMaintenance = false;
+  modeConfiguration = true;
+  modeStartTime = millis();
+  Serial.println(F("Mode Configuration activé."));
+}
+
+void recupDonnees() {
+  DateTime now = rtc.now();
+  float temperature = isTempAirActive ? bme.readTemperature() : 0;
+  float pression = bme.readPressure() / 100.0F;
+  float humidite = (isHygrActive) ? bme.readHumidity() : 0;
+  String luminosite = (isLuminActive && LUMIN == 1) ? String(analogRead(LIGHT_SENSOR_PIN)) + " LUX" : String("NA");
+
+  if (!sdWriteError && SD.begin(SD_CS_PIN)) {
+    char filename[13];
+    int revision = 0;
+    sprintf(filename, "%02d%02d%02d_%d.LOG", now.year() % 100, now.month(), now.day(), revision);
+    File dataFile = SD.open(filename, FILE_WRITE);
+
+    if (dataFile) {
+      if (dataFile.size() >= FILE_MAX_SIZE) {
+        dataFile.close();
+        revision++;
+        sprintf(filename, "%02d%02d%02d_%d.LOG", now.year() % 100, now.month(), now.day(), revision);
+        dataFile = SD.open(filename, FILE_WRITE);
+      }
+
+      if (dataFile) {
+        dataFile.print(now.unixtime());
+        dataFile.print(',');
+        dataFile.print(isTempAirActive ? String(temperature) : String("NA"));
+        dataFile.print(',');
+        dataFile.print(pression);
+        dataFile.print(',');
+        dataFile.print(isHygrActive ? String(humidite) : String(HYGR_NOT_AVAILABLE));
+        dataFile.print(',');
+        dataFile.println(luminosite);
+        dataFile.close();
+      } else {
+        Serial.println(F("Erreur d'écriture sur la carte SD !"));
+        sdWriteError = true;
+      }
+    } else {
+      Serial.println(F("Erreur d'écriture sur la carte SD !"));
+      sdWriteError = true;
+    }
+  }
+}
+
+void afficherDonneesConsole() {
+  DateTime now = rtc.now();
+  float temperature = bme.readTemperature();
+  float pression = bme.readPressure() / 100.0F;
+  float humidite = (isHygrActive) ? bme.readHumidity() : 0;
+  String luminosite = (isLuminActive && LUMIN == 1) ? String(analogRead(LIGHT_SENSOR_PIN)) + " LUX" : String("NA");
+
+  Serial.print(F("Date et Heure: "));
+  Serial.print(now.day(), DEC);
+  Serial.print('/');
+  Serial.print(now.month(), DEC);
+  Serial.print('/');
+  Serial.print(now.year(), DEC);
+  Serial.print(' ');
+  Serial.print(now.hour(), DEC);
+  Serial.print(':');
+  Serial.print(now.minute(), DEC);
+  Serial.print(':');
+  Serial.print(now.second(), DEC);
+  Serial.print(F(" | Température: "));
+  Serial.print(isTempAirActive ? String(temperature) : String("NA"));
+  Serial.print(F(" °C | Pression: "));
+  Serial.print(pression);
+  Serial.print(F(" hPa | Humidité: "));
+  Serial.print(isHygrActive ? String(humidite) : String(HYGR_NOT_AVAILABLE));
+  Serial.print(F(" % | Luminosité: "));
+  Serial.println(luminosite);
+}
+
+void handleSerialCommands() {
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+
+    if (input.startsWith("HYGR=")) {
+      int value = input.substring(5).toInt();
+      if (value == 0) {
+        // Désactiver le capteur et mettre "NA"
+        isHygrActive = false;
+        EEPROM.write(HYGR_ADDR, 0);
+        Serial.println(F("Capteur d'hygrométrie désactivé. Valeur: NA"));
+      } else if (value == 1) {
+        // Activer le capteur
+        isHygrActive = true;
+        EEPROM.write(HYGR_ADDR, value);
+        Serial.println(F("Capteur d'hygrométrie activé."));
+      }
+    } else if (input.startsWith("TEMP_AIR=")) {
+      int value = input.substring(9).toInt();
+      if (value == 0) {
+        // Désactiver le capteur de température
+        isTempAirActive = false;
+        Serial.println(F("Capteur de température désactivé. Valeur: NA"));
+      } else if (value == 1) {
+        // Activer le capteur de température
+        isTempAirActive = true;
+        Serial.println(F("Capteur de température activé."));
+      }
+    } else if (input.startsWith("LUMIN=")) {
+      int value = input.substring(6).toInt();
+      if (value == 0) {
+        // Désactiver le capteur de luminosité
+        isLuminActive = false;
+        Serial.println(F("Capteur de luminosité désactivé."));
+      } else if (value == 1) {
+        // Activer le capteur de luminosité
+        isLuminActive = true;
+        Serial.println(F("Capteur de luminosité activé."));
+      }
+    } else if (input.startsWith("LUMIN_LOW=")) {
+      LUMIN_LOW = input.substring(10).toInt();
+      Serial.print(F("LUMIN_LOW mis à jour: "));
+      Serial.println(LUMIN_LOW);
+    } else if (input.startsWith("LUMIN_HIGH=")) {
+      LUMIN_HIGH = input.substring(11).toInt();
+      Serial.print(F("LUMIN_HIGH mis à jour: "));
+      Serial.println(LUMIN_HIGH);
+    } else if (input.startsWith("MIN_TEMP_AIR=")) {
+      MIN_TEMP_AIR = input.substring(13).toInt();
+      Serial.print(F("MIN_TEMP_AIR mis à jour: "));
+      Serial.println(MIN_TEMP_AIR);
+    } else if (input.startsWith("MAX_TEMP_AIR=")) {
+      MAX_TEMP_AIR = input.substring(13).toInt();
+      Serial.print(F("MAX_TEMP_AIR mis à jour: "));
+      Serial.println(MAX_TEMP_AIR);
+    } else if (input.startsWith("HYGR_MINT=")) {
+      HYGR_MINT = input.substring(10).toInt();
+      Serial.print(F("HYGR_MINT mis à jour: "));
+      Serial.println(HYGR_MINT);
+    } else if (input.startsWith("HYGR_MAXT=")) {
+      HYGR_MAXT = input.substring(10).toInt();
+      Serial.print(F("HYGR_MAXT mis à jour: "));
+      Serial.println(HYGR_MAXT);
+    } else if (input.startsWith("PRESSURE_MIN=")) {
+      PRESSURE_MIN = input.substring(13).toInt();
+      Serial.print(F("PRESSURE_MIN mis à jour: "));
+      Serial.println(PRESSURE_MIN);
+    } else if (input.startsWith("PRESSURE_MAX=")) {
+      PRESSURE_MAX = input.substring(13).toInt();
+      Serial.print(F("PRESSURE_MAX mis à jour: "));
+      Serial.println(PRESSURE_MAX);
+    } else if (input.startsWith("LOG_INTERVAL=")) {
+      LOG_INTERVAL = input.substring(13).toInt() * 1000UL;
+      Serial.println(F("LOG_INTERVAL mis à jour"));
+    } else if (input.startsWith("FILE_MAX_SIZE=")) {
+      FILE_MAX_SIZE = input.substring(14).toInt();
+      Serial.println(F("FILE_MAX_SIZE mis à jour"));
+    } else if (input.startsWith("TIMEOUT=")) {
+      TIMEOUT = input.substring(8).toInt();
+      Serial.println(F("TIMEOUT mis à jour"));
+    } else if (input == "RESET") {
+      resetParameters();
+      Serial.println(F("Paramètres réinitialisés"));
+    } else if (input == "VERSION") {
+      Serial.println(F("Version 1.0 - Lot 12345"));
+    }
+  }
+}
+void resetParameters() {
+  LOG_INTERVAL = 5000UL;
+  FILE_MAX_SIZE = 4096UL;
+  TIMEOUT = 30000UL;
+  LUMIN = 1;
+  LUMIN_LOW = 255;
+  LUMIN_HIGH = 768;
+  TEMP_AIR = 1;
+  MIN_TEMP_AIR = -10;
+  MAX_TEMP_AIR = 60;
+  HYGR = 1;
+  HYGR_MINT = 0;
+  HYGR_MAXT = 50;
+  PRESSURE = 1;
+  PRESSURE_MIN = 850;
+  PRESSURE_MAX = 1080;
+  isLuminActive = true;
+  isHygrActive = true;
+}
