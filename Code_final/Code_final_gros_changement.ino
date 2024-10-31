@@ -539,6 +539,18 @@ void Interface_serie_commands() {
       Serial.println(F("Paramètres réinitialisés aux valeurs par défaut"));
     } else if (input == "VERSION") {
       Serial.println(F("Version 1.0 - Lot 12345"));
+    } else if (input.startsWith("CLOCK=")) { // Nouvel gestion des horaire lol
+      LUMIN_HIGH = input.substring(11).toInt();
+      Serial.print(F("LUMIN_HIGH mis à jour: "));
+      Serial.println(LUMIN_HIGH);
+    } else if (input.startsWith("DATE=")) {
+      LUMIN_HIGH = input.substring(11).toInt();
+      Serial.print(F("LUMIN_HIGH mis à jour: "));
+      Serial.println(LUMIN_HIGH);
+    } else if (input.startsWith("DAY=")) {
+      LUMIN_HIGH = input.substring(11).toInt();
+      Serial.print(F("LUMIN_HIGH mis à jour: "));
+      Serial.println(LUMIN_HIGH);
     } else {
       Serial.println(F("Commande inconnue"));
     }
