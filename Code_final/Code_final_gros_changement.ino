@@ -30,58 +30,38 @@ Adafruit_BME280 bme;
 RTC_DS1307 rtc;
 ChainableLED leds(LED_DATA_PIN, LED_CLOCK_PIN, 1);
 
-unsigned long LOG_INTERVALL = 5000UL;
-unsigned long TIMEOUT = 30000UL;
-unsigned long FILE_MAX_SIZE = 4096UL;
 
-uint8_t LUMIN = 1;
-uint8_t LUMIN_LOW = 255;
-uint16_t LUMIN_HIGH = 768;
+bool eeprom_bool ;
+uint8_t eeprom_uint8 ;
+int8_t eeprom_int8 ;
+unsigned long eeprom_UL ;
+unsigned long eeprom_UL2 ;
+uint16_t eeprom_uint16 ;
 
-uint8_t TEMP_AIR = 1;
-int8_t MIN_TEMP_AIR = -10;
-int8_t MAX_TEMP_AIR = 60;
 
-uint8_t HYGR = 1;
-uint8_t HYGR_MINT = 0;
-uint8_t HYGR_MAXT = 50;
-
-uint8_t PRESSION = 1;
-uint16_t PRESSION_MIN = 850;
-uint16_t PRESSION_MAX = 1080;
-
-unsigned long lastDataAcquisitionTime = 0;
-unsigned long modeStartTime = 0;
-unsigned long maintenanceStartTime = 0;
-
-bool isHygrActive = true;
-bool isTempAirActive = true;
-bool isLuminActive = true;
-bool isPressActive = true;
-
-// Adresse des donnée au dessus je sais pas pour les adresse donc je mets au pif
-#define LOG_INTERVALL_ADDR 14 // Adresse EEPROM pour LOG_INTERVALL
-#define TIMEOUT_ADDR 1
-#define FILE_MAX_SIZE_ADDR 2
-#define LUMIN_ADDR 3
-#define LUMIN_LOW_ADDR 4
-#define LUMIN_HIGH_ADDR 5
-#define TEMP_AIR_ADDR 6
-#define MIN_TEMP_AIR_ADDR 7
-#define MAX_TEMP_AIR_ADDR 8
-#define HYGR_ADDR 10 // Adresse dans l'EEPROM pour la valeur de HYGR
-#define HYGR_MINT_ADDR 9
-#define HYGR_MAXT_ADDR 11
-#define PRESSION_ADDR 12
-#define PRESSION_MIN_ADDR 13 
-#define PRESSION_MAX_ADDR 14
-#define lastDataAcquisitionTime_ADDR 15
-#define modeStartTime_ADDR 16 
-#define maintenanceStartTime_ADDR 17 
-#define isHygrActive_ADDR 18 
-#define isTempAirActive_ADDR 19
-#define isLuminActive_ADDR 20
-#define isPressActive_ADDR 21
+// Adresse des donnée au dessus calculer en fonction des octets requis pile
+#define LOG_INTERVALL_ADDR 50 // Adresse EEPROM pour LOG_INTERVALL
+#define TIMEOUT_ADDR 56
+#define FILE_MAX_SIZE_ADDR 62
+#define LUMIN_ADDR 12
+#define LUMIN_LOW_ADDR 13
+#define LUMIN_HIGH_ADDR 15
+#define TEMP_AIR_ADDR 17
+#define MIN_TEMP_AIR_ADDR 18
+#define MAX_TEMP_AIR_ADDR 19
+#define HYGR_ADDR 20 // Adresse dans l'EEPROM pour la valeur de HYGR
+#define HYGR_MINT_ADDR 21
+#define HYGR_MAXT_ADDR 22
+#define PRESSION_ADDR 23
+#define PRESSION_MIN_ADDR 24
+#define PRESSION_MAX_ADDR 26
+#define lastDataAcquisitionTime_ADDR 68
+#define modeStartTime_ADDR 74
+#define maintenanceStartTime_ADDR 80
+#define isHygrActive_ADDR 28 
+#define isTempAirActive_ADDR 29
+#define isLuminActive_ADDR 30
+#define isPressActive_ADDR 31
 
 // Variables pour la gestion des boutons avec interruptions
 volatile uint8_t buttonStates = 0;
@@ -109,16 +89,9 @@ void setup() {
   initLED();
   initButton();
 
-  // Lire la valeur HYGR de l'EEPROM
-  HYGR = EEPROM.read(HYGR_ADDR);
-  isHygrActive = (HYGR != 0);
-
-  // Lire la valeur LOG_INTERVALL de l'EEPROM
-  EEPROM.get(LOG_INTERVALL_ADDR, LOG_INTERVALL);
-  if (LOG_INTERVALL == 0xFFFFFFFF) { // Si aucune valeur n'a été stockée
-    LOG_INTERVALL = 5000UL; // Valeur par défaut
-  }
-
+  // A chaque allummage l'eeprom se reset 
+  resetParameters();
+  
   if (digitalRead(RED_BUTTON_PIN) == LOW) {
     modConfiguration();
   } else {
@@ -149,15 +122,16 @@ void loop() {
   unsigned long currentTime = millis();
 
   Gestion_bouton();
-
-  if ((currentMode == STANDARD || currentMode == ECO) && (currentTime - lastDataAcquisitionTime >= LOG_INTERVALL)) {
-    lastDataAcquisitionTime = currentTime;
+  EEPROM.get(LOG_INTERVALL_ADDR,eeprom_UL);
+  EEPROM.get(lastDataAcquisitionTime_ADDR,eeprom_UL2);
+  if ((currentMode == STANDARD || currentMode == ECO) && (currentTime - eeprom_UL2 >= eeprom_UL)) {
+    EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
     writeDataToSD();
   }
-
-  if (currentMode == MAINTENANCE && (currentTime - lastDataAcquisitionTime >= 5000UL)) {
-    lastDataAcquisitionTime = currentTime;
+  EEPROM.get(lastDataAcquisitionTime_ADDR,eeprom_UL2);
+  if (currentMode == MAINTENANCE && (currentTime - eeprom_UL2 >= 5000UL)) {
+    EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
     afficherDonneesConsole();
     writeDataToSD();
@@ -320,12 +294,12 @@ void modEco() {
 void modMaintenance() {
   previousMode = currentMode;
   currentMode = MAINTENANCE;
-  maintenanceStartTime = millis(); // Démarrer le chronomètre pour le mode maintenance
+  EEPROM.put(maintenanceStartTime_ADDR,millis()); // Démarrer le chronomètre pour le mode maintenance
 }
 
 void modConfiguration() {
   currentMode = CONFIGURATION;
-  modeStartTime = millis();
+  EEPROM.put(modeStartTime_ADDR,millis());
 }
 
 void recupDonnees() {
@@ -337,22 +311,23 @@ void recupDonnees() {
 
   DateTime now = rtc.now();
   newData->timestamp = now.unixtime();
-
-  if (isTempAirActive) {
+  EEPROM.get(isTempAirActive_ADDR,eeprom_bool);
+  if (eeprom_bool) {
     newData->temperature = bme.readTemperature();
   } else {
     newData->temperature = NAN;
   }
 
   newData->PRESSION = bme.readPressure() / 100.0F;
-
-  if (isHygrActive) {
+  EEPROM.get(isHygrActive_ADDR,eeprom_bool);
+  if (eeprom_bool) {
     newData->humidity = bme.readHumidity();
   } else {
     newData->humidity = NAN;
   }
-
-  if (isLuminActive && LUMIN == 1) {
+  EEPROM.get(LUMIN_ADDR,eeprom_uint8);
+  EEPROM.get(isLuminActive_ADDR,eeprom_bool);
+  if (eeprom_bool && eeprom_uint8 == 1) {
     newData->luminosity = analogRead(LIGHT_SENSOR_PIN);
   } else {
     newData->luminosity = -1;
@@ -384,7 +359,9 @@ void afficherDonneesConsole() {
     Serial.print(now.second(), DEC);
     Serial.print(F(" | Température: "));
 
-    if (isTempAirActive && !isnan(current->temperature)) {
+    EEPROM.get(isTempAirActive_ADDR,eeprom_bool);  
+
+    if (eeprom_bool && !isnan(current->temperature)) {
       Serial.print(current->temperature);
     } else {
       Serial.print("NA");
@@ -394,7 +371,9 @@ void afficherDonneesConsole() {
     Serial.print(current->PRESSION);
     Serial.print(F(" hPa | Humidité: "));
 
-    if (isHygrActive && !isnan(current->humidity)) {
+    EEPROM.get(isHygrActive_ADDR,eeprom_bool);
+
+    if (eeprom_bool && !isnan(current->humidity)) {
       Serial.print(current->humidity);
     } else {
       Serial.print(F("NA"));
@@ -424,7 +403,8 @@ void writeDataToSD() {
   if (dataFile) {
     SensorData* current = dataHead;
     while (current) {
-      if (dataFile.size() >= FILE_MAX_SIZE) {
+      EEPROM.get(FILE_MAX_SIZE_ADDR,eeprom_UL);
+      if (dataFile.size() >= eeprom_UL) {
         dataFile.close();
         revision++;
         sprintf(filename, "%02d%02d%02d_%d.LOG", now.year() % 100, now.month(), now.day(), revision);
@@ -438,7 +418,9 @@ void writeDataToSD() {
       dataFile.print(current->timestamp);
       dataFile.print(',');
 
-      if (isTempAirActive && !isnan(current->temperature)) {
+      EEPROM.get(isTempAirActive_ADDR,eeprom_bool);
+
+      if (eeprom_bool && !isnan(current->temperature)) {
         dataFile.print(current->temperature);
       } else {
         dataFile.print("NA");
@@ -448,7 +430,9 @@ void writeDataToSD() {
       dataFile.print(current->PRESSION);
       dataFile.print(',');
 
-      if (isHygrActive && !isnan(current->humidity)) {
+      EEPROM.get(isHygrActive_ADDR,eeprom_bool);
+
+      if (eeprom_bool && !isnan(current->humidity)) {
         dataFile.print(current->humidity);
       } else {
         dataFile.print("NA");
@@ -476,61 +460,54 @@ void Interface_serie_commands() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
     input.trim();
-    unsigned long input_u ;
     if (input.startsWith("HYGR=")) {
-      input_u = input.substring(5).toInt();
-      if (input_u == 0) {
-        HYGR = input_u;
-        isHygrActive = false;
-        EEPROM.write(HYGR_ADDR, 0);
+      if (input.substring(5).toInt() == 0) {
+        EEPROM.put(HYGR_ADDR,input.substring(5).toInt());
+        EEPROM.put(isHygrActive_ADDR,false);
         Serial.println(F("Capteur d'hygrométrie désactivé. Valeur: NA"));
-      } else if (input_u == 1) {
-        HYGR = input_u;
-        isHygrActive = true;
-        EEPROM.write(HYGR_ADDR, input_u);
+      } else if (input.substring(5).toInt() == 1) {
+        EEPROM.put(HYGR_ADDR,input.substring(5).toInt());
+        EEPROM.put(isHygrActive_ADDR,true);
         Serial.println(F("Capteur d'hygrométrie activé."));
       }
     } else if (input.startsWith("TEMP_AIR=")) {
-      input_u = input.substring(9).toInt();
-      if (input_u == 0) {
-        TEMP_AIR = input_u;
-        isTempAirActive = false;
+      if (input.substring(5).toInt() == 0) {
+        EEPROM.put(TEMP_AIR_ADDR,input.substring(9).toInt());
+        EEPROM.put(isTempAirActive_ADDR,false);
         Serial.println(F("Capteur de température désactivé. Valeur: NA"));
-      } else if (input_u == 1) {
-        TEMP_AIR = input_u;
-        isTempAirActive = true;
+      } else if (input.substring(5).toInt() == 1) {
+        EEPROM.put(TEMP_AIR_ADDR,input.substring(9).toInt());
+        EEPROM.put(isTempAirActive_ADDR,true);
         Serial.println(F("Capteur de température activé."));
       }
     } else if (input.startsWith("LUMIN=")) {
-      input_u = input.substring(6).toInt();
-      if (input_u == 0) {
-        LUMIN = input_u;
-        isLuminActive = false;
+      if (input.substring(5).toInt() == 0) {
+        EEPROM.put(LUMIN_ADDR,input.substring(6).toInt());
+        EEPROM.put(isLuminActive_ADDR,false);
         Serial.println(F("Capteur de luminosité désactivé."));
-      } else if (input_u == 1) {
-        LUMIN = input_u;
-        isLuminActive = true;
+      } else if (input.substring(5).toInt() == 1) {
+        EEPROM.put(LUMIN_ADDR,input.substring(6).toInt());
+        EEPROM.put(isLuminActive_ADDR,true);
         Serial.println(F("Capteur de luminosité activé."));
       }
     }  else if (input.startsWith("PRESSURE=")) {
-      input_u = input.substring(9).toInt();
-      if (input_u == 0) {
-        PRESSION = input_u;
-        isPressActive = false;
+      if (input.substring(5).toInt() == 0) {
+        EEPROM.put(PRESSION_ADDR,input.substring(9).toInt());
+        EEPROM.put(isPressActive_ADDR,false);
         Serial.println(F("Capteur de pression désactivé. Valeur: NA"));
-      } else if (input_u == 1) {
-        PRESSION = input_u;
-        isPressActive = true;
+      } else if (input.substring(5).toInt() == 1) {
+        EEPROM.put(PRESSION_ADDR,input.substring(9).toInt());
+        EEPROM.put(isPressActive_ADDR,true);
         Serial.println(F("Capteur de pression activé."));
       }
     } 
     
     else if (input.startsWith("LUMIN_LOW=")) {
-      input_u = input.substring(10).toInt(); 
-      if (input_u >= 0 && input_u <= 1023){
-        LUMIN_LOW = input_u ;
+      if (input.substring(5).toInt() >= 0 && input.substring(5).toInt() <= 1023){
+        EEPROM.put(LUMIN_LOW_ADDR,input.substring(10).toInt());
         Serial.print(F("LUMIN_LOW mis à jour: "));
-        Serial.println(LUMIN_LOW);
+        EEPROM.get(LUMIN_LOW_ADDR,eeprom_uint16);
+        Serial.println(eeprom_uint16);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(0-1023)"));
@@ -538,12 +515,12 @@ void Interface_serie_commands() {
       
     } 
     
-    else if (input.startsWith("LUMIN_HIGH=")) {
-      input_u = input.substring(11).toInt(); 
-      if (input_u >= 0 && input_u <= 1023){
-        LUMIN_HIGH = input_u ;
+    else if (input.startsWith("LUMIN_HIGH=")) { 
+      if (input.substring(5).toInt() >= 0 && input.substring(5).toInt() <= 1023){
+        EEPROM.put(LUMIN_HIGH_ADDR,input.substring(11).toInt());
+        EEPROM.get(LUMIN_HIGH_ADDR,eeprom_uint16);
         Serial.print(F("LUMIN_HIGH mis à jour: "));
-        Serial.println(LUMIN_HIGH);
+        Serial.println(eeprom_uint16);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(0-1023)"));
@@ -551,11 +528,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("MIN_TEMP_AIR=")) {
-      input_u = input.substring(13).toInt(); 
-      if (input_u >= -40 && input_u <= 85){
-        MIN_TEMP_AIR = input_u ;
+      if (input.substring(5).toInt() >= -40 && input.substring(5).toInt() <= 85){
+        EEPROM.put(MIN_TEMP_AIR_ADDR,input.substring(13).toInt());
         Serial.print(F("MIN_TEMP_AIR mis à jour: "));
-        Serial.println(MIN_TEMP_AIR);
+        EEPROM.get(MIN_TEMP_AIR_ADDR,eeprom_int8);
+        Serial.println(eeprom_int8);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
@@ -563,11 +540,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("MAX_TEMP_AIR=")) {
-      input_u = input.substring(13).toInt(); 
-      if (input_u >= -40 && input_u <= 85){
-        MAX_TEMP_AIR = input_u ;
+      if (input.substring(5).toInt() >= -40 && input.substring(5).toInt() <= 85){
+        EEPROM.put(MAX_TEMP_AIR_ADDR,input.substring(13).toInt());
         Serial.print(F("MAX_TEMP_AIR mis à jour: "));
-        Serial.println(MAX_TEMP_AIR);
+        EEPROM.get(MAX_TEMP_AIR_ADDR,eeprom_int8);
+        Serial.println(eeprom_int8);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
@@ -575,11 +552,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("HYGR_MINT=")) {
-      input_u = input.substring(10).toInt(); 
-      if (input_u >= -40 && input_u <= 85){
-        HYGR_MINT = input_u ;
+      if (input.substring(5).toInt() >= -40 && input.substring(5).toInt() <= 85){
+        EEPROM.put(HYGR_MINT_ADDR,input.substring(10).toInt());
         Serial.print(F("HYGR_MINT mis à jour: "));
-        Serial.println(HYGR_MINT);
+        EEPROM.get(HYGR_MINT_ADDR,eeprom_uint8);
+        Serial.println(eeprom_uint8);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
@@ -587,11 +564,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("HYGR_MAXT=")) {
-      input_u = input.substring(10).toInt(); 
-      if (input_u >= -40 && input_u <= 85){
-        HYGR_MAXT = input_u ;
+      if (input.substring(5).toInt() >= -40 && input.substring(5).toInt() <= 85){
+        EEPROM.put(HYGR_MAXT_ADDR,input.substring(10).toInt());
         Serial.print(F("HYGR_MAXT mis à jour: "));
-        Serial.println(HYGR_MAXT);
+        EEPROM.get(HYGR_MAXT_ADDR,eeprom_uint8);
+        Serial.println(eeprom_uint8);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
@@ -599,11 +576,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("PRESSURE_MIN=")) {
-      input_u = input.substring(13).toInt(); 
-      if (input_u >= 300 && input_u <= 1000){
-        PRESSION_MIN = input_u ;
+      if (input.substring(5).toInt() >= 300 && input.substring(5).toInt() <= 1000){
+        EEPROM.put(PRESSION_MIN_ADDR,input.substring(13).toInt());
         Serial.print(F("PRESSION_MIN mis à jour: "));
-        Serial.println(PRESSION_MIN);
+        EEPROM.get(PRESSION_MIN_ADDR,eeprom_uint16);
+        Serial.println(eeprom_uint16);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(300-1000)"));
@@ -611,11 +588,11 @@ void Interface_serie_commands() {
     } 
     
     else if (input.startsWith("PRESSURE_MAX=")) {
-      input_u = input.substring(13).toInt(); 
-      if (input_u >= 300 && input_u <= 1000){
-        PRESSION_MAX = input_u ;
+      if (input.substring(5).toInt() >= 300 && input.substring(5).toInt() <= 1000){
+        EEPROM.put(PRESSION_MAX_ADDR,input.substring(13).toInt());
         Serial.print(F("PRESSION_MAX mis à jour: "));
-        Serial.println(PRESSION_MAX);
+        EEPROM.get(PRESSION_MAX_ADDR,eeprom_uint16);
+        Serial.println(eeprom_uint16);
       }
       else {
         Serial.println(F("La valeur n'est pas dans l'intervalle(300-1000)"));
@@ -652,26 +629,27 @@ void Interface_serie_commands() {
         Serial.println(F("Jours inexistante"));
       }
 
-    else if (input.startsWith("LOG_INTERVALL=")) {
-      input_u = input.substring(14).toInt() * 60000UL; // Conversion en millisecondes
-      LOG_INTERVALL = input_u;
-      EEPROM.put(LOG_INTERVALL_ADDR, LOG_INTERVALL); // Sauvegarder dans l'EEPROM
+    else if (input.startsWith("LOG_INTERVALL=")) {// Conversion en millisecondes
+      EEPROM.put(LOG_INTERVALL_ADDR,input.substring(14).toInt() * 60000UL); // Sauvegarder dans l'EEPROM
       Serial.print(F("LOG_INTERVALL mis à jour: "));
-      Serial.print(LOG_INTERVALL / 60000UL);
+      EEPROM.get(LOG_INTERVALL_ADDR,eeprom_UL);
+      Serial.print(eeprom_UL / 60000UL);
       Serial.println(F(" minutes"));
     } 
     
     else if (input.startsWith("FILE_MAX_SIZE=")) {
-      FILE_MAX_SIZE = input.substring(14).toInt();
+      EEPROM.put(FILE_MAX_SIZE_ADDR,input.substring(14).toInt());
       Serial.print(F("FILE_MAX_SIZE mis à jour: "));
-      Serial.print(FILE_MAX_SIZE);
+      EEPROM.get(FILE_MAX_SIZE_ADDR,eeprom_UL);
+      Serial.print(eeprom_UL);
       Serial.println(F(" octets"));
     } 
     
-    else if (input.startsWith("TIMEOUT=")) {
-      TIMEOUT = input.substring(8).toInt() * 1000UL; // Conversion en millisecondes
+    else if (input.startsWith("TIMEOUT=")) { // Conversion en millisecondes
+      EEPROM.put(TIMEOUT_ADDR,input.substring(8).toInt() * 1000UL);
       Serial.print(F("TIMEOUT mis à jour: "));
-      Serial.print(TIMEOUT / 1000);
+      EEPROM.get(TIMEOUT_ADDR,eeprom_UL)
+      Serial.print(eeprom_UL / 1000);
       Serial.println(F(" secondes"));
     } 
     
@@ -688,24 +666,27 @@ void Interface_serie_commands() {
   }
 }
 
-void resetParameters() {
-  LOG_INTERVALL = 5000UL;
-  EEPROM.put(LOG_INTERVALL_ADDR, LOG_INTERVALL); // Réinitialiser dans l'EEPROM
-  FILE_MAX_SIZE = 4096UL;
-  TIMEOUT = 30000UL;
-  LUMIN = 1;
-  LUMIN_LOW = 255;
-  LUMIN_HIGH = 768;
-  TEMP_AIR = 1;
-  MIN_TEMP_AIR = -10;
-  MAX_TEMP_AIR = 60;
-  HYGR = 1;
-  HYGR_MINT = 0;
-  HYGR_MAXT = 50;
-  PRESSION = 1;
-  PRESSION_MIN = 850;
-  PRESSION_MAX = 1080;
-  isLuminActive = true;
-  isHygrActive = true;
-  isTempAirActive = true;
+void resetParameters() { // Réinitialiser dans l'EEPROM touts les paramètres
+  EEPROM.put(LOG_INTERVALL_ADDR, (unsigned long)5000UL);
+  EEPROM.put(TIMEOUT_ADDR, (unsigned long)30000UL);
+  EEPROM.put(FILE_MAX_SIZE_ADDR, (unsigned long)4096UL);
+  EEPROM.put(LUMIN_ADDR, (uint8_t)1);
+  EEPROM.put(LUMIN_LOW_ADDR, (uint16_t)255);
+  EEPROM.put(LUMIN_HIGH_ADDR, (uint16_t)768);
+  EEPROM.put(TEMP_AIR_ADDR, (uint8_t)1);
+  EEPROM.put(MIN_TEMP_AIR_ADDR, (int8_t)-10);
+  EEPROM.put(MAX_TEMP_AIR_ADDR, (int8_t)60);
+  EEPROM.put(HYGR_ADDR, (uint8_t)1);
+  EEPROM.put(HYGR_MINT_ADDR, (uint8_t)0);
+  EEPROM.put(HYGR_MAXT_AIR_ADDR, (uint8_t)50);
+  EEPROM.put(PRESSION_ADDR, (uint8_t)1);
+  EEPROM.put(PRESSION_MIN_ADDR, (uint16_t)850);
+  EEPROM.put(PRESSION_MAX_ADDR, (uint16_t)1080);
+  EEPROM.put(lastDataAcquisitionTime_ADDR, (unsigned long)0);
+  EEPROM.put(modeStartTime_ADDR, (unsigned long)0);
+  EEPROM.put(maintenanceStartTime_ADDR,(unsigned long)0);
+  EEPROM.put(isHygrActive_ADDR, (bool)true);
+  EEPROM.put(isTempAirActive_ADDR, (bool)true);
+  EEPROM.put(isLuminActive_ADDR, (bool)true);
+  EEPROM.put(isPressActive_ADDR, (bool)true);
 }
