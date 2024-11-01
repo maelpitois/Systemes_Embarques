@@ -13,8 +13,7 @@
 #define LED_CLOCK_PIN 8
 #define LIGHT_SENSOR_PIN A2
 #define SD_CS_PIN 4
-#define HYGR_ADDR 10 // Adresse dans l'EEPROM pour la valeur de HYGR
-#define LOG_INTERVALL_ADDR 14 // Adresse EEPROM pour LOG_INTERVALL
+
 
 enum Mode { STANDARD, ECO, MAINTENANCE, CONFIGURATION };
 Mode currentMode = STANDARD;
@@ -58,6 +57,31 @@ unsigned long maintenanceStartTime = 0;
 bool isHygrActive = true;
 bool isTempAirActive = true;
 bool isLuminActive = true;
+bool isPressActive = true;
+
+// Adresse des donnée au dessus je sais pas pour les adresse donc je mets au pif
+#define LOG_INTERVALL_ADDR 14 // Adresse EEPROM pour LOG_INTERVALL
+#define TIMEOUT_ADDR 1
+#define FILE_MAX_SIZE_ADDR 2
+#define LUMIN_ADDR 3
+#define LUMIN_LOW_ADDR 4
+#define LUMIN_HIGH_ADDR 5
+#define TEMP_AIR_ADDR 6
+#define MIN_TEMP_AIR_ADDR 7
+#define MAX_TEMP_AIR_ADDR 8
+#define HYGR_ADDR 10 // Adresse dans l'EEPROM pour la valeur de HYGR
+#define HYGR_MINT_ADDR 9
+#define HYGR_MAXT_ADDR 11
+#define PRESSION_ADDR 12
+#define PRESSION_MIN_ADDR 13 
+#define PRESSION_MAX_ADDR 14
+#define lastDataAcquisitionTime_ADDR 15
+#define modeStartTime_ADDR 16 
+#define maintenanceStartTime_ADDR 17 
+#define isHygrActive_ADDR 18 
+#define isTempAirActive_ADDR 19
+#define isLuminActive_ADDR 20
+#define isPressActive_ADDR 21
 
 // Variables pour la gestion des boutons avec interruptions
 volatile uint8_t buttonStates = 0;
@@ -452,106 +476,213 @@ void Interface_serie_commands() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
     input.trim();
-
+    unsigned long input_u ;
     if (input.startsWith("HYGR=")) {
-      int value = input.substring(5).toInt();
-      HYGR = value;
-      if (value == 0) {
+      input_u = input.substring(5).toInt();
+      if (input_u == 0) {
+        HYGR = input_u;
         isHygrActive = false;
         EEPROM.write(HYGR_ADDR, 0);
         Serial.println(F("Capteur d'hygrométrie désactivé. Valeur: NA"));
-      } else if (value == 1) {
+      } else if (input_u == 1) {
+        HYGR = input_u;
         isHygrActive = true;
-        EEPROM.write(HYGR_ADDR, value);
+        EEPROM.write(HYGR_ADDR, input_u);
         Serial.println(F("Capteur d'hygrométrie activé."));
       }
     } else if (input.startsWith("TEMP_AIR=")) {
-      int value = input.substring(9).toInt();
-      TEMP_AIR = value;
-      if (value == 0) {
+      input_u = input.substring(9).toInt();
+      if (input_u == 0) {
+        TEMP_AIR = input_u;
         isTempAirActive = false;
         Serial.println(F("Capteur de température désactivé. Valeur: NA"));
-      } else if (value == 1) {
+      } else if (input_u == 1) {
+        TEMP_AIR = input_u;
         isTempAirActive = true;
         Serial.println(F("Capteur de température activé."));
       }
     } else if (input.startsWith("LUMIN=")) {
-      int value = input.substring(6).toInt();
-      LUMIN = value;
-      if (value == 0) {
+      input_u = input.substring(6).toInt();
+      if (input_u == 0) {
+        LUMIN = input_u;
         isLuminActive = false;
         Serial.println(F("Capteur de luminosité désactivé."));
-      } else if (value == 1) {
+      } else if (input_u == 1) {
+        LUMIN = input_u;
         isLuminActive = true;
         Serial.println(F("Capteur de luminosité activé."));
       }
-    } else if (input.startsWith("LUMIN_LOW=")) {
-      LUMIN_LOW = input.substring(10).toInt();
-      Serial.print(F("LUMIN_LOW mis à jour: "));
-      Serial.println(LUMIN_LOW);
-    } else if (input.startsWith("LUMIN_HIGH=")) {
-      LUMIN_HIGH = input.substring(11).toInt();
-      Serial.print(F("LUMIN_HIGH mis à jour: "));
-      Serial.println(LUMIN_HIGH);
-    } else if (input.startsWith("MIN_TEMP_AIR=")) {
-      MIN_TEMP_AIR = input.substring(13).toInt();
-      Serial.print(F("MIN_TEMP_AIR mis à jour: "));
-      Serial.println(MIN_TEMP_AIR);
-    } else if (input.startsWith("MAX_TEMP_AIR=")) {
-      MAX_TEMP_AIR = input.substring(13).toInt();
-      Serial.print(F("MAX_TEMP_AIR mis à jour: "));
-      Serial.println(MAX_TEMP_AIR);
-    } else if (input.startsWith("HYGR_MINT=")) {
-      HYGR_MINT = input.substring(10).toInt();
-      Serial.print(F("HYGR_MINT mis à jour: "));
-      Serial.println(HYGR_MINT);
-    } else if (input.startsWith("HYGR_MAXT=")) {
-      HYGR_MAXT = input.substring(10).toInt();
-      Serial.print(F("HYGR_MAXT mis à jour: "));
-      Serial.println(HYGR_MAXT);
-    } else if (input.startsWith("PRESSURE_MIN=")) {
-      PRESSION_MIN = input.substring(13).toInt();
-      Serial.print(F("PRESSION_MIN mis à jour: "));
-      Serial.println(PRESSION_MIN);
-    } else if (input.startsWith("PRESSURE_MAX=")) {
-      PRESSION_MAX = input.substring(13).toInt();
-      Serial.print(F("PRESSION_MAX mis à jour: "));
-      Serial.println(PRESSION_MAX);
-    } else if (input.startsWith("LOG_INTERVALL=")) {
-      unsigned long value = input.substring(14).toInt() * 60000UL; // Conversion en millisecondes
-      LOG_INTERVALL = value;
+    }  else if (input.startsWith("PRESSURE=")) {
+      input_u = input.substring(9).toInt();
+      if (input_u == 0) {
+        PRESSION = input_u;
+        isPressActive = false;
+        Serial.println(F("Capteur de pression désactivé. Valeur: NA"));
+      } else if (input_u == 1) {
+        PRESSION = input_u;
+        isPressActive = true;
+        Serial.println(F("Capteur de pression activé."));
+      }
+    } 
+    
+    else if (input.startsWith("LUMIN_LOW=")) {
+      input_u = input.substring(10).toInt(); 
+      if (input_u >= 0 && input_u <= 1023){
+        LUMIN_LOW = input_u ;
+        Serial.print(F("LUMIN_LOW mis à jour: "));
+        Serial.println(LUMIN_LOW);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(0-1023)"));
+      }
+      
+    } 
+    
+    else if (input.startsWith("LUMIN_HIGH=")) {
+      input_u = input.substring(11).toInt(); 
+      if (input_u >= 0 && input_u <= 1023){
+        LUMIN_HIGH = input_u ;
+        Serial.print(F("LUMIN_HIGH mis à jour: "));
+        Serial.println(LUMIN_HIGH);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(0-1023)"));
+      }
+    } 
+    
+    else if (input.startsWith("MIN_TEMP_AIR=")) {
+      input_u = input.substring(13).toInt(); 
+      if (input_u >= -40 && input_u <= 85){
+        MIN_TEMP_AIR = input_u ;
+        Serial.print(F("MIN_TEMP_AIR mis à jour: "));
+        Serial.println(MIN_TEMP_AIR);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
+      }
+    } 
+    
+    else if (input.startsWith("MAX_TEMP_AIR=")) {
+      input_u = input.substring(13).toInt(); 
+      if (input_u >= -40 && input_u <= 85){
+        MAX_TEMP_AIR = input_u ;
+        Serial.print(F("MAX_TEMP_AIR mis à jour: "));
+        Serial.println(MAX_TEMP_AIR);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
+      }
+    } 
+    
+    else if (input.startsWith("HYGR_MINT=")) {
+      input_u = input.substring(10).toInt(); 
+      if (input_u >= -40 && input_u <= 85){
+        HYGR_MINT = input_u ;
+        Serial.print(F("HYGR_MINT mis à jour: "));
+        Serial.println(HYGR_MINT);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
+      }
+    } 
+    
+    else if (input.startsWith("HYGR_MAXT=")) {
+      input_u = input.substring(10).toInt(); 
+      if (input_u >= -40 && input_u <= 85){
+        HYGR_MAXT = input_u ;
+        Serial.print(F("HYGR_MAXT mis à jour: "));
+        Serial.println(HYGR_MAXT);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(-40-85)"));
+      }
+    } 
+    
+    else if (input.startsWith("PRESSURE_MIN=")) {
+      input_u = input.substring(13).toInt(); 
+      if (input_u >= 300 && input_u <= 1000){
+        PRESSION_MIN = input_u ;
+        Serial.print(F("PRESSION_MIN mis à jour: "));
+        Serial.println(PRESSION_MIN);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(300-1000)"));
+      }
+    } 
+    
+    else if (input.startsWith("PRESSURE_MAX=")) {
+      input_u = input.substring(13).toInt(); 
+      if (input_u >= 300 && input_u <= 1000){
+        PRESSION_MAX = input_u ;
+        Serial.print(F("PRESSION_MAX mis à jour: "));
+        Serial.println(PRESSION_MAX);
+      }
+      else {
+        Serial.println(F("La valeur n'est pas dans l'intervalle(300-1000)"));
+      }
+    } 
+    // temps fonction difference 
+    else if (input.startsWith("CLOCK=")) {
+      input_u = input.substring(6).toInt(); 
+      if (...){
+        ...
+        Serial.println(F("Heure mis a jours"));
+      }
+      else {
+        Serial.println(F("Heure inexistante"));
+      }
+    
+    else if (input.startsWith("DATE=")) {
+      input_u = input.substring(5).toInt(); 
+      if (...){
+        ...
+        Serial.println(F("Date mis a jours"));
+      }
+      else {
+        Serial.println(F("Date inexistante"));
+      }
+
+    else if (input.startsWith("DAY=")) {
+      char day = input.substring(4).toChar(); 
+      if (day == "MON" || day == "TUE" || day == "WED" || day == "THU" || day == "FRI" || day == "SAT" ||day == "SUN"){
+        ...
+        Serial.println(F("Jours mis a jours"));
+      }
+      else {
+        Serial.println(F("Jours inexistante"));
+      }
+
+    else if (input.startsWith("LOG_INTERVALL=")) {
+      input_u = input.substring(14).toInt() * 60000UL; // Conversion en millisecondes
+      LOG_INTERVALL = input_u;
       EEPROM.put(LOG_INTERVALL_ADDR, LOG_INTERVALL); // Sauvegarder dans l'EEPROM
       Serial.print(F("LOG_INTERVALL mis à jour: "));
       Serial.print(LOG_INTERVALL / 60000UL);
       Serial.println(F(" minutes"));
-    } else if (input.startsWith("FILE_MAX_SIZE=")) {
+    } 
+    
+    else if (input.startsWith("FILE_MAX_SIZE=")) {
       FILE_MAX_SIZE = input.substring(14).toInt();
       Serial.print(F("FILE_MAX_SIZE mis à jour: "));
       Serial.print(FILE_MAX_SIZE);
       Serial.println(F(" octets"));
-    } else if (input.startsWith("TIMEOUT=")) {
+    } 
+    
+    else if (input.startsWith("TIMEOUT=")) {
       TIMEOUT = input.substring(8).toInt() * 1000UL; // Conversion en millisecondes
       Serial.print(F("TIMEOUT mis à jour: "));
       Serial.print(TIMEOUT / 1000);
       Serial.println(F(" secondes"));
-    } else if (input == "RESET") {
+    } 
+    
+    else if (input == "RESET") {
       resetParameters();
       Serial.println(F("Paramètres réinitialisés aux valeurs par défaut"));
-    } else if (input == "VERSION") {
+    } 
+    else if (input == "VERSION") {
       Serial.println(F("Version 1.0 - Lot 12345"));
-    } else if (input.startsWith("CLOCK=")) { // Nouvel gestion des horaire lol
-      LUMIN_HIGH = input.substring(11).toInt();
-      Serial.print(F("LUMIN_HIGH mis à jour: "));
-      Serial.println(LUMIN_HIGH);
-    } else if (input.startsWith("DATE=")) {
-      LUMIN_HIGH = input.substring(11).toInt();
-      Serial.print(F("LUMIN_HIGH mis à jour: "));
-      Serial.println(LUMIN_HIGH);
-    } else if (input.startsWith("DAY=")) {
-      LUMIN_HIGH = input.substring(11).toInt();
-      Serial.print(F("LUMIN_HIGH mis à jour: "));
-      Serial.println(LUMIN_HIGH);
-    } else {
+    }
+    else {
       Serial.println(F("Commande inconnue"));
     }
   }
