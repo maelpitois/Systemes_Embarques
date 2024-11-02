@@ -512,9 +512,7 @@ void Interface_serie_commands() {
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
     input.trim();
-    uint8_t valeur1 ;
-    int valeur2;
-    int valeur3;
+    int valeur1,valeur2,valeur3 ;
     if (input.startsWith("HYGR=")) {
       activateSensor(input.substring(5).toInt() == 1, HYGR_ADDR, isHygrActive_ADDR,
                      F("Capteur d'hygrométrie activé."), F("Capteur d'hygrométrie désactivé. Valeur: NA"));
@@ -551,8 +549,8 @@ void Interface_serie_commands() {
       if (isValidRange(valeur2, 300, 1000)) updateEEPROM(valeur3, valeur2, input.startsWith("PRESSURE_MIN=") ? F("PRESSION_MIN mis à jour: ") : F("PRESSION_MAX mis à jour: "));
       else Serial.println(F("Erreur"));
     } else if (input.startsWith("CLOCK=")) {
-      valeur1 = input.substring(6, 7).toInt();
-      valeur2 = input.substring(9, 10).toInt();
+      valeur1 = input.substring(6, 8).toInt();
+      valeur2 = input.substring(9, 11).toInt();
       valeur3 = input.substring(12).toInt();
       if (isValidRange(valeur1, 0, 23) && isValidRange(valeur2, 0, 59) && isValidRange(valeur3, 0, 59)) {
         DateTime temp = rtc.now();
@@ -560,9 +558,9 @@ void Interface_serie_commands() {
         Serial.println(F("Heure mise à jour"));
       } else Serial.println(F("Erreur"));
     } else if (input.startsWith("DATE=")) {
-      valeur1 = input.substring(5, 6).toInt();
-      valeur2 = input.substring(8, 9).toInt();
-      valeur3 = input.substring(11, 14).toInt();
+      valeur1 = input.substring(5, 7).toInt();
+      valeur2 = input.substring(8, 10).toInt();
+      valeur3 = input.substring(11, 15).toInt();
       if (isValidRange(valeur1, 1, 12) && isValidRange(valeur2, 1, 31) && isValidRange(valeur3, 2000, 2099)) {
         DateTime temp = rtc.now();
         rtc.adjust(DateTime(valeur3, valeur1, valeur2, temp.hour(), temp.minute(), temp.second()));
