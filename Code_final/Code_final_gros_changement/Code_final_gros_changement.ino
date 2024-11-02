@@ -90,7 +90,7 @@ void setup() {
   initButton();
 
   // A chaque allummage l'eeprom se reset 
-  resetParameters();
+  
   
   if (digitalRead(RED_BUTTON_PIN) == LOW) {
     modConfiguration();
@@ -600,35 +600,63 @@ void Interface_serie_commands() {
     } 
     // temps fonction difference 
     else if (input.startsWith("CLOCK=")) {
-      input_u = input.substring(6).toInt(); 
-      if (...){
-        ...
-        Serial.println(F("Heure mis a jours"));
+      if (input.substring(6,7).toInt()<=23 && input.substring(6,7).toInt()>=0 && input.substring(9,10).toInt()<=59 && input.substring(9,10).toInt()>=0 && input.substring(12).toInt()<=59 && input.substring(12).toInt()>=59){
+      DateTime temp = rtc.now();
+      rtc.adjust(DateTime(temp.year(),temp.month(), temp.day(),input.substring(6,7).toInt() ,input.substring(9,10).toInt() , input.substring(12).toInt()));
+      Serial.println(F("Heure mis a jours"));
       }
       else {
-        Serial.println(F("Heure inexistante"));
+        Serial.println(F("Heure inexistante ou mise en forme incorect ex : 12,59,30(heure,minutes,seconde)"));
       }
-    
+    }
     else if (input.startsWith("DATE=")) {
-      input_u = input.substring(5).toInt(); 
-      if (...){
-        ...
-        Serial.println(F("Date mis a jours"));
+      if (input.substring(5,6).toInt()<=12 && input.substring(5,6).toInt()>=1 && input.substring(8,9).toInt()<=31 && input.substring(8,9).toInt()>=1 && input.substring(11,14).toInt()<=2099 && input.substring(11,14).toInt()>=2000){
+      DateTime temp = rtc.now();
+      rtc.adjust(DateTime(input.substring(11,14).toInt(),input.substring(5,6).toInt(),input.substring(8,9).toInt(),temp.hour(),temp.minute(),temp.second()));
+      Serial.println(F("Date mis a jours"));
       }
       else {
-        Serial.println(F("Date inexistante"));
+        Serial.println(F("Date inexistante ou mise en forme incorect ex : 12,25,2004(mois,jour,année)"));
       }
 
+    }
     else if (input.startsWith("DAY=")) {
-      char day = input.substring(4).toChar(); 
-      if (day == "MON" || day == "TUE" || day == "WED" || day == "THU" || day == "FRI" || day == "SAT" ||day == "SUN"){
-        ...
-        Serial.println(F("Jours mis a jours"));
+      String day = input.substring(4,6); 
+      int jour_semaine = -1 ;
+      if (day.equals("MON")) {
+        jour_semaine = 1;}
+      else if (day.equals("TUE") ) {
+        jour_semaine = 2;}
+      else if (day.equals("WED")) {
+        jour_semaine = 3;}
+      else if (day.equals("THU")) {
+        jour_semaine = 4;}
+      else if (day.equals("FRI")) {
+        jour_semaine = 5;}
+      else if (day.equals("SAT")) {
+        jour_semaine = 6;}
+      else if (day.equals("SUN")) {
+        jour_semaine = 0;}
+
+      if(jour_semaine != -1){
+          Wire.beginTransmission(0x68);  // Adresse I2C du DS1307
+          Wire.write(0x03);  // Registre de jour de la semaine
+          Wire.write(jour_semaine);   // Ecrit le jour (0=Dimanche, 1=Lundi, ..., 6=Samedi)
+          Wire.endTransmission();
+
+
+
+
+        Serial.println(F("Jour mis à jour"));
+
+
       }
       else {
-        Serial.println(F("Jours inexistante"));
+          Serial.println(F("Jours inexistante"));
+
       }
 
+    }
     else if (input.startsWith("LOG_INTERVALL=")) {// Conversion en millisecondes
       EEPROM.put(LOG_INTERVALL_ADDR,input.substring(14).toInt() * 60000UL); // Sauvegarder dans l'EEPROM
       Serial.print(F("LOG_INTERVALL mis à jour: "));
@@ -648,7 +676,7 @@ void Interface_serie_commands() {
     else if (input.startsWith("TIMEOUT=")) { // Conversion en millisecondes
       EEPROM.put(TIMEOUT_ADDR,input.substring(8).toInt() * 1000UL);
       Serial.print(F("TIMEOUT mis à jour: "));
-      EEPROM.get(TIMEOUT_ADDR,eeprom_UL)
+      EEPROM.get(TIMEOUT_ADDR,eeprom_UL);
       Serial.print(eeprom_UL / 1000);
       Serial.println(F(" secondes"));
     } 
@@ -678,7 +706,7 @@ void resetParameters() { // Réinitialiser dans l'EEPROM touts les paramètres
   EEPROM.put(MAX_TEMP_AIR_ADDR, (int8_t)60);
   EEPROM.put(HYGR_ADDR, (uint8_t)1);
   EEPROM.put(HYGR_MINT_ADDR, (uint8_t)0);
-  EEPROM.put(HYGR_MAXT_AIR_ADDR, (uint8_t)50);
+  EEPROM.put(HYGR_MAXT_ADDR, (uint8_t)50);
   EEPROM.put(PRESSION_ADDR, (uint8_t)1);
   EEPROM.put(PRESSION_MIN_ADDR, (uint16_t)850);
   EEPROM.put(PRESSION_MAX_ADDR, (uint16_t)1080);
