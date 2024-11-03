@@ -24,7 +24,8 @@ uint8_t errorFlags = 0;
 #define SD_CARD_FULL       0x04 
 #define SD_WRITE_ERROR     0x08
 #define SENSOR_DATA_ERROR  0x10
-//manque donnée incohérentes
+#define SENSOR_DATA_INCORECT 0x12
+
 
 
 Adafruit_BME280 bme;
@@ -114,12 +115,14 @@ void loop() {
   if ((currentMode == STANDARD || currentMode == ECO) && (currentTime - eeprom_UL2 >= eeprom_UL)) {
     EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
+    updateLEDs();
     writeDataToSD();
   }
   EEPROM.get(lastDataAcquisitionTime_ADDR,eeprom_UL2);
   if (currentMode == MAINTENANCE && (currentTime - eeprom_UL2 >= 5000UL)) {
     EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
+    updateLEDs();
     afficherDonneesConsole();
     writeDataToSD();
   }
@@ -261,6 +264,23 @@ void gestion_erreur(){
     errorFlags |= RTC_ERROR;
   }
 }
+void incorect_data(bool capteur, int data) {
+    int min, max;
+    
+    // Détermine les adresses EEPROM en fonction du capteur
+    const int minAddr = capteur ? MIN_TEMP_AIR_ADDR : PRESSION_MIN_ADDR;
+    const int maxAddr = capteur ? MAX_TEMP_AIR_ADDR : PRESSION_MAX_ADDR;
+    
+    // Récupération des valeurs min et max depuis l'EEPROM
+    EEPROM.get(minAddr, min);
+    EEPROM.get(maxAddr, max);
+    
+    // Vérification de la validité des données
+    if (!isValidRange(data, min, max)) {
+        errorFlags |= SENSOR_DATA_INCORECT;
+    }
+}
+
 
 void updateLEDs() {
   if (errorFlags & RTC_ERROR) {
@@ -283,6 +303,11 @@ void updateLEDs() {
     delay(500);
     leds.setColorRGB(0, 0, 255, 0);
     delay(500);
+  } else if (errorFlags & SENSOR_DATA_INCORECT) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 0, 255, 0);
+    delay(100);
   } else if (errorFlags & SD_CARD_FULL) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
@@ -346,6 +371,7 @@ void recupDonnees() {
   newData->timestamp = now.unixtime();
   EEPROM.get(isTempAirActive_ADDR,eeprom_bool);
   if (eeprom_bool) {
+    incorect_data(true,bme.readTemperature());
     newData->temperature = bme.readTemperature();
   } else {
     newData->temperature = NAN;
@@ -354,6 +380,7 @@ void recupDonnees() {
   newData->PRESSION = bme.readPressure() / 100.0F;
   EEPROM.get(isHygrActive_ADDR,eeprom_bool);
   if (eeprom_bool) {
+    incorect_data(false,bme.readHumidity());
     newData->humidity = bme.readHumidity();
   } else {
     newData->humidity = NAN;
@@ -551,16 +578,16 @@ void Interface_serie_commands() {
     int valeur1,valeur2,valeur3 ;
     if (input.startsWith("HYGR=")) {
       activateSensor(input.substring(5).toInt() == 1, HYGR_ADDR, isHygrActive_ADDR,
-                     F("Capteur d'hygrométrie activé."), F("Capteur d'hygrométrie désactivé. Valeur: NA"));
+                     F("Capteur activé."), F("Capteur désactivé."));
     } else if (input.startsWith("TEMP_AIR=")) {
       activateSensor(input.substring(9).toInt() == 1, TEMP_AIR_ADDR, isTempAirActive_ADDR,
-                     F("Capteur de température activé."), F("Capteur de température désactivé. Valeur: NA"));
+                     F("Capteur activé."), F("Capteur désactivé."));
     } else if (input.startsWith("LUMIN=")) {
       activateSensor(input.substring(6).toInt() == 1, LUMIN_ADDR, isLuminActive_ADDR,
-                     F("Capteur de luminosité activé."), F("Capteur de luminosité désactivé."));
+                     F("Capteur activé."), F("Capteur désactivé."));
     } else if (input.startsWith("PRESSURE=")) {
       activateSensor(input.substring(9).toInt() == 1, PRESSION_ADDR, isPressActive_ADDR,
-                     F("Capteur de pression activé."), F("Capteur de pression désactivé. Valeur: NA"));
+                     F("Capteur de pression activé."), F("Capteur PRESSURE désactivé."));
     } else if (input.startsWith("LUMIN_LOW=")) {
       valeur1 = input.substring(10).toInt();
       if (isValidRange(valeur1, 0, 1023)) updateEEPROM(LUMIN_LOW_ADDR, valeur1, F("LUMIN_LOW mis à jour: "));
@@ -643,27 +670,36 @@ void Interface_serie_commands() {
 
 
 
-void resetParameters() { // Réinitialiser dans l'EEPROM touts les paramètres
-  EEPROM.put(LOG_INTERVALL_ADDR,5000);
-  EEPROM.put(TIMEOUT_ADDR, 30000);
-  EEPROM.put(FILE_MAX_SIZE_ADDR, 4096);
-  EEPROM.put(LUMIN_ADDR, 1);
-  EEPROM.put(LUMIN_LOW_ADDR, 255);
-  EEPROM.put(LUMIN_HIGH_ADDR,768);
-  EEPROM.put(TEMP_AIR_ADDR,1);
-  EEPROM.put(MIN_TEMP_AIR_ADDR, -10);
-  EEPROM.put(MAX_TEMP_AIR_ADDR,60);
-  EEPROM.put(HYGR_ADDR,1);
-  EEPROM.put(HYGR_MINT_ADDR,0);
-  EEPROM.put(HYGR_MAXT_ADDR,50);
-  EEPROM.put(PRESSION_ADDR, 1);
-  EEPROM.put(PRESSION_MIN_ADDR,850);
-  EEPROM.put(PRESSION_MAX_ADDR,1080);
-  EEPROM.put(lastDataAcquisitionTime_ADDR,0);
-  EEPROM.put(modeStartTime_ADDR, 0);
-  EEPROM.put(maintenanceStartTime_ADDR,0);
-  EEPROM.put(isHygrActive_ADDR,true);
-  EEPROM.put(isTempAirActive_ADDR,true);
-  EEPROM.put(isLuminActive_ADDR,true);
-  EEPROM.put(isPressActive_ADDR,true);
+void resetParameters() { // Réinitialiser dans l'EEPROM tous les paramètres
+    const struct {
+        int address;
+        int value;
+    } parameters[] = {
+        {LOG_INTERVALL_ADDR, 5000},
+        {TIMEOUT_ADDR, 30000},
+        {FILE_MAX_SIZE_ADDR, 4096},
+        {LUMIN_ADDR, 1},
+        {LUMIN_LOW_ADDR, 255},
+        {LUMIN_HIGH_ADDR, 768},
+        {TEMP_AIR_ADDR, 1},
+        {MIN_TEMP_AIR_ADDR, -10},
+        {MAX_TEMP_AIR_ADDR, 60},
+        {HYGR_ADDR, 1},
+        {HYGR_MINT_ADDR, 0},
+        {HYGR_MAXT_ADDR, 50},
+        {PRESSION_ADDR, 1},
+        {PRESSION_MIN_ADDR, 850},
+        {PRESSION_MAX_ADDR, 1080},
+        {lastDataAcquisitionTime_ADDR, 0},
+        {modeStartTime_ADDR, 0},
+        {maintenanceStartTime_ADDR, 0},
+        {isHygrActive_ADDR, true},
+        {isTempAirActive_ADDR, true},
+        {isLuminActive_ADDR, true},
+        {isPressActive_ADDR, true}
+    };
+
+    for (const auto& param : parameters) {
+        EEPROM.put(param.address, param.value);
+    }
 }
