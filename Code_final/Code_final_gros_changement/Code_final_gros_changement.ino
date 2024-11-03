@@ -91,6 +91,8 @@ void setup() {
   initLED();
   initButton();
   
+  
+
   if (digitalRead(RED_BUTTON_PIN) == LOW) {
     modConfiguration();
   } else {
@@ -115,16 +117,13 @@ void loop() {
   if ((currentMode == STANDARD || currentMode == ECO) && (currentTime - eeprom_UL2 >= eeprom_UL)) {
     EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
-    updateLEDs();
     writeDataToSD();
   }
   EEPROM.get(lastDataAcquisitionTime_ADDR,eeprom_UL2);
   if (currentMode == MAINTENANCE && (currentTime - eeprom_UL2 >= 5000UL)) {
     EEPROM.put(lastDataAcquisitionTime_ADDR,currentTime);
     recupDonnees();
-    updateLEDs();
     afficherDonneesConsole();
-    writeDataToSD();
   }
 
   
@@ -288,12 +287,12 @@ void updateLEDs() {
     delay(500);
     leds.setColorRGB(0, 0, 0, 255);
     delay(500);
-  } else if (errorFlags & GPS_ERROR) {
+  } /*else if (errorFlags & GPS_ERROR) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 255, 255, 0);
     delay(500);
-  } else if (errorFlags & SD_WRITE_ERROR) {
+  } */else if (errorFlags & SD_WRITE_ERROR) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 255, 255, 255);
@@ -307,7 +306,7 @@ void updateLEDs() {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 0, 255, 0);
-    delay(100);
+    delay(1000);
   } else if (errorFlags & SD_CARD_FULL) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
@@ -371,16 +370,17 @@ void recupDonnees() {
   newData->timestamp = now.unixtime();
   EEPROM.get(isTempAirActive_ADDR,eeprom_bool);
   if (eeprom_bool) {
+    
     incorect_data(true,bme.readTemperature());
     newData->temperature = bme.readTemperature();
   } else {
     newData->temperature = NAN;
   }
 
+  incorect_data(false,bme.readPressure() / 100.0F);
   newData->PRESSION = bme.readPressure() / 100.0F;
   EEPROM.get(isHygrActive_ADDR,eeprom_bool);
   if (eeprom_bool) {
-    incorect_data(false,bme.readHumidity());
     newData->humidity = bme.readHumidity();
   } else {
     newData->humidity = NAN;
@@ -399,6 +399,7 @@ void recupDonnees() {
     ptr = &((*ptr)->next);
   }
   *ptr = newData;
+  updateLEDs();
 }
 
 void afficherDonneesConsole() {
