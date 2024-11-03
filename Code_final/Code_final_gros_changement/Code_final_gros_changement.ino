@@ -283,6 +283,11 @@ void updateLEDs() {
     delay(500);
     leds.setColorRGB(0, 0, 255, 0);
     delay(1000);
+  } else if (errorFlags & SD_CARD_FULL) {
+    leds.setColorRGB(0, 255, 0, 0);
+    delay(500);
+    leds.setColorRGB(0, 255, 255, 255);
+    delay(1000);
   } else {
     switch (currentMode) {
       case STANDARD:
@@ -420,6 +425,7 @@ void afficherDonneesConsole() {
 }
 
 void writeDataToSD() {
+  if (!dataHead || (errorFlags & SD_WRITE_ERROR)) return;
   Carte_pleine();
   updateLEDs();
 
