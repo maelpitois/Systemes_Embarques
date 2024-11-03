@@ -277,17 +277,17 @@ void updateLEDs() {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 255, 255, 255);
-    delay(500);
+    delay(1000);
   } else if (errorFlags & SENSOR_DATA_ERROR) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 0, 255, 0);
-    delay(1000);
+    delay(500);
   } else if (errorFlags & SD_CARD_FULL) {
     leds.setColorRGB(0, 255, 0, 0);
     delay(500);
     leds.setColorRGB(0, 255, 255, 255);
-    delay(1000);
+    delay(500);
   } else {
     switch (currentMode) {
       case STANDARD:
