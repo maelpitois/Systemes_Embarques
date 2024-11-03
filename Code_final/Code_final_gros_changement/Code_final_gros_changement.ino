@@ -24,7 +24,7 @@ uint8_t errorFlags = 0;
 #define SD_CARD_FULL       0x04 
 #define SD_WRITE_ERROR     0x08
 #define SENSOR_DATA_ERROR  0x10
-#define SENSOR_DATA_INCORECT 0x12
+#define SENSOR_DATA_INCORECT 0x20
 
 
 
@@ -90,7 +90,7 @@ void setup() {
 
   initLED();
   initButton();
-  
+  gestion_erreur();
   
 
   if (digitalRead(RED_BUTTON_PIN) == LOW) {
@@ -98,9 +98,6 @@ void setup() {
   } else {
     modStandard();
   }
-
-  
-  
 
   // Configurer les interruptions pour les boutons sur changement d'état
   attachInterrupt(digitalPinToInterrupt(GREEN_BUTTON_PIN), greenButtonISR, CHANGE);
@@ -230,24 +227,27 @@ void initButton() {
   pinMode(GREEN_BUTTON_PIN, INPUT_PULLUP);
   pinMode(RED_BUTTON_PIN, INPUT_PULLUP);
 }
+// Erreur Carte SD pleine apres de nombreuse recherche nous avons abandonnés sur cette gestion d'erreur a cause de cette fonction qui devrais etre fonctionel
+//File fichierTemporaire;
+//fichierTemporaire = SD.open("temporaire.txt", FILE_WRITE);
+//Nous n'avons pas trouver de solutions en ligne mais voici le code qui devrais fonctionner avec celle ci si elle marchais.
+/*
+void Carte_pleine() { 
+  File fichierTemporaire;
+  fichierTemporaire = SD.open("temporaire.txt", FILE_WRITE);
 
-
-// Fonction pour vérifier si la carte SD est pleine
-void Carte_pleine() {
-  // Tente de créer et d'écrire dans un fichier temporaire
-  File fichierTemporaire = SD.open("temporaire.txt", FILE_WRITE);
-
-  // Vérifie si la création ou l'écriture du fichier échoue
-  if (!fichierTemporaire || fichierTemporaire.write('A') == 0) {
+  if (!fichierTemporaire) {
+    Serial.println("Erreur : créer");
+    errorFlags |= SD_CARD_FULL;
+  } else if (fichierTemporaire.write('A') == 0) {
+    Serial.println("Erreur : écriture");
     errorFlags |= SD_CARD_FULL;
   }
 
-  // Ferme et supprime le fichier temporaire si nécessaire
   if (fichierTemporaire) fichierTemporaire.close();
   SD.remove("temporaire.txt");
 }
-
-
+*/
 
 void gestion_erreur(){
    // test initialisation des capteur sd et rtc si il sont ouvert ou non
@@ -263,19 +263,36 @@ void gestion_erreur(){
     errorFlags |= RTC_ERROR;
   }
 }
-void incorect_data(bool capteur, int data) {
-    int min, max;
-    
+void incorect_data(bool isTemperature, int data) {
     // Détermine les adresses EEPROM en fonction du capteur
-    const int minAddr = capteur ? MIN_TEMP_AIR_ADDR : PRESSION_MIN_ADDR;
-    const int maxAddr = capteur ? MAX_TEMP_AIR_ADDR : PRESSION_MAX_ADDR;
-    
+    const int8_t minAddr = isTemperature ? MIN_TEMP_AIR_ADDR : PRESSION_MIN_ADDR;
+    const int16_t maxAddr = isTemperature ? MAX_TEMP_AIR_ADDR : PRESSION_MAX_ADDR;
+
     // Récupération des valeurs min et max depuis l'EEPROM
-    EEPROM.get(minAddr, min);
-    EEPROM.get(maxAddr, max);
+    int8_t minTemp;
+    int16_t minPressure;
+    int16_t min;
     
+    // Lire la valeur min en fonction du type
+    if (isTemperature) {
+        EEPROM.get(minAddr, minTemp);
+        min = minTemp; // Convertir en int si nécessaire
+    } else {
+        EEPROM.get(minAddr, minPressure);
+        min = minPressure; // Conserver comme int
+    }
+
+    int16_t max;
+    if (isTemperature) {
+        int8_t maxTemp;
+        EEPROM.get(maxAddr, maxTemp);
+        max = maxTemp; // Convertir en int si nécessaire
+    } else {
+        EEPROM.get(maxAddr, max);
+    }
+
     // Vérification de la validité des données
-    if (!isValidRange(data, min, max)) {
+    if (data < min || data > max) {
         errorFlags |= SENSOR_DATA_INCORECT;
     }
 }
@@ -454,7 +471,7 @@ void afficherDonneesConsole() {
 
 void writeDataToSD() {
   if (!dataHead || (errorFlags & SD_WRITE_ERROR)) return;
-  Carte_pleine();
+  //Carte_pleine();
   updateLEDs();
 
   static uint8_t revision = 0;
@@ -579,16 +596,16 @@ void Interface_serie_commands() {
     int valeur1,valeur2,valeur3 ;
     if (input.startsWith("HYGR=")) {
       activateSensor(input.substring(5).toInt() == 1, HYGR_ADDR, isHygrActive_ADDR,
-                     F("Capteur activé."), F("Capteur désactivé."));
+                     F("Capteur activé."), F("Capteur désactivé"));
     } else if (input.startsWith("TEMP_AIR=")) {
       activateSensor(input.substring(9).toInt() == 1, TEMP_AIR_ADDR, isTempAirActive_ADDR,
-                     F("Capteur activé."), F("Capteur désactivé."));
+                     F("Capteur activé."), F("Capteur désactivé"));
     } else if (input.startsWith("LUMIN=")) {
       activateSensor(input.substring(6).toInt() == 1, LUMIN_ADDR, isLuminActive_ADDR,
-                     F("Capteur activé."), F("Capteur désactivé."));
+                     F("Capteur activé."), F("Capteur désactivé"));
     } else if (input.startsWith("PRESSURE=")) {
       activateSensor(input.substring(9).toInt() == 1, PRESSION_ADDR, isPressActive_ADDR,
-                     F("Capteur de pression activé."), F("Capteur PRESSURE désactivé."));
+                     F("Capteur de pression activé."), F("Capteur PRESSURE désactivé"));
     } else if (input.startsWith("LUMIN_LOW=")) {
       valeur1 = input.substring(10).toInt();
       if (isValidRange(valeur1, 0, 1023)) updateEEPROM(LUMIN_LOW_ADDR, valeur1, F("LUMIN_LOW mis à jour: "));
@@ -699,8 +716,21 @@ void resetParameters() { // Réinitialiser dans l'EEPROM tous les paramètres
         {isLuminActive_ADDR, true},
         {isPressActive_ADDR, true}
     };
-
+    const struct {
+        int address;
+        int8_t value;
+    }parameters2[] = {
+      {MIN_TEMP_AIR_ADDR, -10},
+      {MAX_TEMP_AIR_ADDR, 60},
+      {HYGR_MINT_ADDR, 0},
+      {HYGR_MAXT_ADDR, 50}
+    };
     for (const auto& param : parameters) {
         EEPROM.put(param.address, param.value);
-    }
+    };
+
+    for (const auto& param : parameters2) {
+        EEPROM.put(param.address,param.value);
+    };
+    
 }
