@@ -21,9 +21,11 @@ Mode previousMode = STANDARD;
 uint8_t errorFlags = 0;
 #define RTC_ERROR          0x01
 #define GPS_ERROR          0x02
-//#define SD_CARD_FULL       0x04 // pas utiliser inutile
+#define SD_CARD_FULL       0x04 
 #define SD_WRITE_ERROR     0x08
 #define SENSOR_DATA_ERROR  0x10
+//manque donnée incohérentes
+
 
 Adafruit_BME280 bme;
 RTC_DS1307 rtc;
@@ -37,8 +39,7 @@ unsigned long eeprom_UL ;
 unsigned long eeprom_UL2 ;
 uint16_t eeprom_uint16 ;
 
-//a refaire
-// Adresse des donnée au dessus calculer en fonction des octets requis pile
+
 #define LOG_INTERVALL_ADDR 50 // Adresse EEPROM pour LOG_INTERVALL
 #define TIMEOUT_ADDR 56
 #define FILE_MAX_SIZE_ADDR 62
@@ -81,15 +82,13 @@ typedef struct SensorData {
 
 SensorData* dataHead = NULL;
 
+
 void setup() {
   Serial.begin(9600);
   delay(1000);
 
   initLED();
   initButton();
-
-  // A chaque allummage l'eeprom se reset 
-  
   
   if (digitalRead(RED_BUTTON_PIN) == LOW) {
     modConfiguration();
@@ -97,20 +96,8 @@ void setup() {
     modStandard();
   }
 
-  if (!SD.begin(SD_CS_PIN)) {
-    errorFlags |= SD_WRITE_ERROR;
-  } else {
-  }
-
-  if (!bme.begin(0x76)) {
-    errorFlags |= SENSOR_DATA_ERROR;
-  }
-
-  if (!rtc.begin()) {
-    errorFlags |= RTC_ERROR;
-  } else if (!rtc.isrunning()) {
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
+  
+  
 
   // Configurer les interruptions pour les boutons sur changement d'état
   attachInterrupt(digitalPinToInterrupt(GREEN_BUTTON_PIN), greenButtonISR, CHANGE);
@@ -121,6 +108,7 @@ void loop() {
   unsigned long currentTime = millis();
 
   Gestion_bouton();
+
   EEPROM.get(LOG_INTERVALL_ADDR,eeprom_UL);
   EEPROM.get(lastDataAcquisitionTime_ADDR,eeprom_UL2);
   if ((currentMode == STANDARD || currentMode == ECO) && (currentTime - eeprom_UL2 >= eeprom_UL)) {
@@ -136,7 +124,7 @@ void loop() {
     writeDataToSD();
   }
 
-  updateLEDs();
+  
 
   if (currentMode == CONFIGURATION) {
     Interface_serie_commands();
@@ -241,6 +229,39 @@ void initButton() {
   pinMode(RED_BUTTON_PIN, INPUT_PULLUP);
 }
 
+
+// Fonction pour vérifier si la carte SD est pleine
+void Carte_pleine() {
+  // Tente de créer et d'écrire dans un fichier temporaire
+  File fichierTemporaire = SD.open("temporaire.txt", FILE_WRITE);
+
+  // Vérifie si la création ou l'écriture du fichier échoue
+  if (!fichierTemporaire || fichierTemporaire.write('A') == 0) {
+    errorFlags |= SD_CARD_FULL;
+  }
+
+  // Ferme et supprime le fichier temporaire si nécessaire
+  if (fichierTemporaire) fichierTemporaire.close();
+  SD.remove("temporaire.txt");
+}
+
+
+
+void gestion_erreur(){
+   // test initialisation des capteur sd et rtc si il sont ouvert ou non
+  if (!SD.begin(SD_CS_PIN)) {
+    errorFlags |= SD_WRITE_ERROR;
+  }
+
+  if (!bme.begin(0x76)) {
+    errorFlags |= SENSOR_DATA_ERROR;
+  }
+
+  if (!rtc.begin()) {
+    errorFlags |= RTC_ERROR;
+  }
+}
+
 void updateLEDs() {
   if (errorFlags & RTC_ERROR) {
     leds.setColorRGB(0, 255, 0, 0);
@@ -282,22 +303,30 @@ void updateLEDs() {
 
 void modStandard() {
   currentMode = STANDARD;
+  gestion_erreur();
+  updateLEDs();
   // Ne pas réinitialiser LOG_INTERVALL ici pour conserver la valeur personnalisée
 }
 
 void modEco() {
   currentMode = ECO;
+  gestion_erreur();
+  updateLEDs();
   // Ne pas réinitialiser LOG_INTERVALL ici pour conserver la valeur personnalisée
 }
 
 void modMaintenance() {
   previousMode = currentMode;
   currentMode = MAINTENANCE;
+  gestion_erreur();
+  updateLEDs();
   EEPROM.put(maintenanceStartTime_ADDR,millis()); // Démarrer le chronomètre pour le mode maintenance
 }
 
 void modConfiguration() {
   currentMode = CONFIGURATION;
+  gestion_erreur();
+  updateLEDs();
   EEPROM.put(modeStartTime_ADDR,millis());
 }
 
@@ -391,7 +420,8 @@ void afficherDonneesConsole() {
 }
 
 void writeDataToSD() {
-  if (!dataHead || (errorFlags & SD_WRITE_ERROR)) return;
+  Carte_pleine();
+  updateLEDs();
 
   static uint8_t revision = 0;
   DateTime now = rtc.now();
